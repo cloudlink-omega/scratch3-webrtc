@@ -1,7 +1,4 @@
-![CL5 Extension Gallery Thumbnail](https://github.com/cloudlink-omega/cl5/assets/12957745/50b012dc-eaa9-41c2-9584-817346406a6a)
+![WebRTC barebones for Scratch](https://github.com/cloudlink-omega/scratch3-webrtc/assets/12957745/098cb8b2-d002-4681-a3b5-4515be306c99)
 
-# CL5 Protocol Extension
-An implementation of the CloudLink 5 protocol for Scratch 3, which powers CLΩ.
-
-## Documentation
-See the Wiki for [In-Band](https://github.com/cloudlink-omega/cl5/wiki/In‐Band) and [Signaling](https://github.com/cloudlink-omega/cl5/wiki/Signaling) protocol documentation.
+# Barebones WebRTC for Scratch 3
+A slimmed-down version of the CL5 protocol extension, designed to offer a basic implementation of the WebRTC standard for Scratch 3.
