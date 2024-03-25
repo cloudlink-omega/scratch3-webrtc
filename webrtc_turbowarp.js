@@ -1,5 +1,5 @@
 /*
-CloudLink 5 Protocol extension for Scratch 3 (Turbowarp-flavored)
+Barebones WebRTC extension for Scratch 3 (Turbowarp-flavored)
 Copyright (C) 2024 Mike Renaker "MikeDEV".
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,7 +21,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-// TODO: reimplement VM variable/list access: see old version https://github.com/MikeDev101/cloudlink-omega/blob/bde3426ce537c6adae0ca3da3d47db7473513902/client/cloudlinkomega_turbowarp.js
+// TODO: remove CL5-specific code
 
 (function (Scratch) {
     // Define class to provide message encryption (ECDH-P256-AES-GCM with SPKI-BASE64 public keys)
