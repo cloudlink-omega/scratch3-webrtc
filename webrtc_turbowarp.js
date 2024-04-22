@@ -21,6 +21,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+// TODO 1: Remove CL Omega redundant code
+// TODO 2: Audio support
+// TODO 3: Audio panning support https://developer.mozilla.org/en-US/docs/Web/API/StereoPannerNode
+
 (() => {
     (function (Scratch2) {
 
@@ -59,27 +63,39 @@ SOFTWARE.
                     onIceGatheringDone: {},
                     onChannelOpen: {},
                     onChannelMessage: {},
+                    onChannelClose: {},
                 }
                 this.iceCandidates = {};
             }
     
             getPeers() {
-                let output = new Object();
+                let output = new Array();
     
-                // Convert each entry of peerConnections into [{name: ulid}] format
+                // Convert each entry of peerConnections into [name] format
                 let peers = Array.from(this.peerConnections.keys());
-                let cons = this.peerConnections;
-    
-                // Only include peer connections that are fully established.
                 Array.from(peers).forEach((ulid) => {
-                    if (cons.get(ulid).connectionState == "connected") output[cons.get(ulid).user] = ulid;
+                    output.push(ulid);
+                })
+    
+                return output;
+            }
+
+            getConnectedPeers() {
+                let output = new Array();
+    
+                // Convert each entry of peerConnections into [name] format
+                let peers = Array.from(this.peerConnections.keys());
+                
+                // Filter out disconnected or preparing peers
+                Array.from(peers).forEach((ulid) => {
+                    if (this.peerConnections.get(ulid).connectionState == "connected") output.push(ulid);
                 })
     
                 return output;
             }
     
             getPeerChannels(remoteUserId) {
-                if (!this.doesPeerExist(remoteUserId)) return [];
+                if (!this.isPeerConnected(remoteUserId)) return [];
                 return Array.from(this.dataChannels.get(remoteUserId).keys());
             }
     
@@ -296,9 +312,11 @@ SOFTWARE.
                 if (!this.dataChannels.has(remoteUserId)) this.dataChannels.set(remoteUserId, new Map());
     
                 // Create channel message storage
-                channel.dataStorage = new Map();
+                channel.dataStorage = "";
     
                 channel.onmessage = (event) => {
+                    console.log(`Data channel ${channel.label} with ${remoteUserName} (${remoteUserId}) has new message ${event.data}`);
+                    this.dataChannels.get(remoteUserId).get(channel.label).dataStorage = event.data;
                     if (this.messageHandlers.onChannelMessage[remoteUserId]) {
                         this.messageHandlers.onChannelMessage[remoteUserId](event.data, channel);
                     }
@@ -314,11 +332,13 @@ SOFTWARE.
                 channel.onclose = () => {
                     console.log(`Data channel ${channel.label} with ${remoteUserName} (${remoteUserId}) closed`);
                     if (channel.label == "default") {
-                        this.disconnectDataPeer(remoteUserId);
                         this.closeVoiceStream(remoteUserId);
+                        this.disconnectDataPeer(remoteUserId);
                     } else {
                         this.dataChannels.get(remoteUserId).delete(channel.label);
                     }
+
+                    if (this.messageHandlers.onChannelClose[remoteUserId]) this.messageHandlers.onChannelClose[remoteUserId](channel.label);
                 };
     
                 // Store reference to channel
@@ -358,34 +378,33 @@ SOFTWARE.
                 const peerConnection = this.peerConnections.get(remoteUserId);
                 const dataChannel = peerConnection.createDataChannel(
                     label,
-                    { negotiated: true, id: peerConnection.channelIdCounter+1, ordered: ordered, protocol: 'clomega' }
+                    { negotiated: false, ordered }
                 );
-                peerConnection.channelIdCounter++;
                 this.handleDataChannel(dataChannel, remoteUserId, peerConnection.user);
                 return dataChannel;
             }
 
             closeChannel(remoteUserId, label) {
-                const peerConnection = this.peerConnections.get(remoteUserId);
-                const dataChannel = peerConnection.dataChannels.get(label);
-                dataChannel.close();
-                peerConnection.dataChannels.delete(label);
+                if (!this.dataChannels.has(remoteUserId)) return;
+                if (!this.dataChannels.get(remoteUserId).has(label)) return;
+                this.dataChannels.get(remoteUserId).get(label).close();
+                this.dataChannels.get(remoteUserId).delete(label);
             }
     
-            doesPeerExist(remoteUserId) {
+            isPeerConnected(remoteUserId) {
                 if (!this.peerConnections.get(remoteUserId)) return false;
                 return (this.peerConnections.get(remoteUserId).connectionState == "connected");
             }
     
             doesPeerChannelExist(remoteUserId, channel) {
-                if (!this.doesPeerExist(remoteUserId)) return false;
+                if (!this.isPeerConnected(remoteUserId)) return false;
                 return this.dataChannels.get(remoteUserId).has(channel);
             }
     
             createDefaultChannel(peerConnection, remoteUserId, remoteUserName) {
                 const dataChannel = peerConnection.createDataChannel(
                     "default",
-                    { negotiated: true, id: 0, ordered: true, protocol: 'clomega' }
+                    { negotiated: true, id: 0, ordered: true }
                 );
                 this.handleDataChannel(dataChannel, remoteUserId, remoteUserName);
                 return dataChannel;
@@ -409,7 +428,7 @@ SOFTWARE.
                         }
                         this.dataChannels.delete(remoteUserId);
                     }
-    
+
                     console.log(`Disconnected peer ${remoteUserName} (${remoteUserId}).`);
                 }
             }
@@ -426,8 +445,8 @@ SOFTWARE.
                 this.messageHandlers.onChannelOpen[remoteUserId] = callback;
             }
     
-            onChannelClose(callback) {
-                this.messageHandlers.onChannelClose = callback;
+            onChannelClose(remoteUserId, callback) {
+                this.messageHandlers.onChannelClose[remoteUserId] = callback;
             }
     
             onChannelMessage(remoteUserId, callback) {
@@ -439,6 +458,7 @@ SOFTWARE.
                 const peer = this.dataChannels.get(remoteUserId);
     
                 if (!peer) {
+                    console.warn(`Peer ${remoteUserId} does not exist`);
                     return;
                 }
     
@@ -446,6 +466,7 @@ SOFTWARE.
                 const channel = peer.get(channelLabel);
     
                 if (!channel) {
+                    console.warn(`Channel ${channelLabel} does not exist for peer ${remoteUserId}`);
                     return;
                 }
     
@@ -460,12 +481,12 @@ SOFTWARE.
                 })
             }
     
-            getChannelData(remoteUserId, channelLabel, channelDataType) {
+            getChannelData(remoteUserId, channelLabel) {
                 const peer = this.dataChannels.get(remoteUserId);
                 if (!peer) return;
                 const channel = peer.get(channelLabel);
                 if (!channel) return;
-                return channel.dataStorage.get(channelDataType);
+                return channel.dataStorage;
             }
     
             removeIceCandidate(remoteUserId, candidate) {
@@ -503,6 +524,11 @@ SOFTWARE.
                         {
                             opcode: 'allPeers',
                             blockType: Scratch2.BlockType.REPORTER,
+                            text: 'All peer connection objects'
+                        },
+                        {
+                            opcode: 'allConnectedPeers',
+                            blockType: Scratch2.BlockType.REPORTER,
                             text: 'All connected peers'
                         },
                         {
@@ -526,7 +552,7 @@ SOFTWARE.
                                     defaultValue: "apple",
                                 }
                             },
-                            text: 'Create peer [name] connection'
+                            text: 'Create peer [name] connection object'
                         },
                         {
                             opcode: 'closePeer',
@@ -537,7 +563,7 @@ SOFTWARE.
                                     defaultValue: "apple",
                                 }
                             },
-                            text: 'Close peer [name] connection'
+                            text: 'Close peer [name] connection object'
                         },
                         {
                             opcode: 'isPeerConnected',
@@ -571,7 +597,7 @@ SOFTWARE.
                                     defaultValue: "apple",
                                 }
                             },
-                            text: 'Generated offer for peer [peer]'
+                            text: 'Offer for peer [peer]'
                         },
                         "---",
                         {
@@ -590,6 +616,41 @@ SOFTWARE.
                             text: 'Make answer for peer [peer] using offer [offer]'
                         },
                         {
+                            opcode: 'getAnswer',
+                            blockType: Scratch2.BlockType.REPORTER,
+                            arguments: {
+                                peer: {
+                                    type: Scratch2.ArgumentType.STRING,
+                                    defaultValue: "apple",
+                                }
+                            },
+                            text: 'Answer for peer [peer]'
+                        },
+                        "---",
+                        {
+                            opcode: 'generateIce',
+                            blockType: Scratch2.BlockType.COMMAND,
+                            arguments: {
+                                peer: {
+                                    type: Scratch2.ArgumentType.STRING,
+                                    defaultValue: "apple",
+                                }
+                            },
+                            text: 'Gather ICE candidates for peer [peer]'
+                        },
+                        {
+                            opcode: 'getIce',
+                            blockType: Scratch2.BlockType.REPORTER,
+                            arguments: {
+                                peer: {
+                                    type: Scratch2.ArgumentType.STRING,
+                                    defaultValue: "apple",
+                                }
+                            },
+                            text: 'All ICE candidates for peer [peer]'
+                        },
+                        "---",
+                        {
                             opcode: 'handleAnswer',
                             blockType: Scratch2.BlockType.COMMAND,
                             arguments: {
@@ -602,30 +663,7 @@ SOFTWARE.
                                     defaultValue: "apple",
                                 }
                             },
-                            text: 'Handle answer [answer] from peer [peer]'
-                        },
-                        {
-                            opcode: 'getAnswer',
-                            blockType: Scratch2.BlockType.REPORTER,
-                            arguments: {
-                                peer: {
-                                    type: Scratch2.ArgumentType.STRING,
-                                    defaultValue: "apple",
-                                }
-                            },
-                            text: 'Generated answer for peer [peer]'
-                        },
-                        "---",
-                        {
-                            opcode: 'generateIce',
-                            blockType: Scratch2.BlockType.COMMAND,
-                            arguments: {
-                                peer: {
-                                    type: Scratch2.ArgumentType.STRING,
-                                    defaultValue: "apple",
-                                }
-                            },
-                            text: 'Generate ICE candidates for peer [peer]'
+                            text: 'Handle peer [peer]\'s answer [answer]'
                         },
                         {
                             opcode: 'handleIce',
@@ -640,18 +678,7 @@ SOFTWARE.
                                     defaultValue: "apple",
                                 }
                             },
-                            text: 'Handle ICE candidates [ice] from peer [peer]'
-                        },
-                        {
-                            opcode: 'getIce',
-                            blockType: Scratch2.BlockType.REPORTER,
-                            arguments: {
-                                peer: {
-                                    type: Scratch2.ArgumentType.STRING,
-                                    defaultValue: "apple",
-                                }
-                            },
-                            text: 'Generated ICE candidates for peer [peer]'
+                            text: 'Handle peer [peer]\'s ICE candidates [ice]'
                         },
                         "---",
                         {
@@ -710,7 +737,7 @@ SOFTWARE.
                                     defaultValue: false,
                                 }
                             },
-                            text: 'Create channel [channel] with peer [peer] and is this channel ordered? [ordered]'
+                            text: 'Create data channel [channel] with peer [peer] and is this channel ordered? [ordered]'
                         },
                         {
                             opcode: 'closeChannel',
@@ -725,7 +752,7 @@ SOFTWARE.
                                     defaultValue: "apple",
                                 }
                             },
-                            text: 'Close channel [channel] with peer [peer]'
+                            text: 'Close data channel [channel] with peer [peer]'
                         },
                         {
                             opcode: 'isChannelOpen',
@@ -740,14 +767,19 @@ SOFTWARE.
                                     defaultValue: "apple",
                                 }
                             },
-                            text: 'Does channel [channel] with peer [peer] exist?'
+                            text: 'Does data channel [channel] with peer [peer] exist?'
                         },
                     ]
                 }
             }
+
+            allConnectedPeers(){
+                return JSON.stringify(this.webrtc.getConnectedPeers());
+            }
     
-            newPeer(args, util) {
+            newPeer(args) {
                 const name = args.name;
+
                 if (this.webrtc.peerConnections.has(name)) {
                     console.warn(`Peer ${name} already exists`);
                     return;
@@ -759,17 +791,22 @@ SOFTWARE.
                 this.ice[name] = new Array();
 
                 this.webrtc.onIceCandidate(name, (candidate) => {
-                    console.log(`Got ICE candidate for ${name}`);
                     this.ice[name].push(candidate);
                 });
                 
                 this.webrtc.onIceGatheringDone(name, () => {
-                    console.log(`Done gathering ICE candidates for ${name}`);
                     this.iceComplete[name] = true;
                 });
+
+                this.webrtc.onChannelClose(name, (channel) => {
+                    if (channel == "default") { 
+                        this.iceComplete.delete(name);
+                        this.ice.delete(name);
+                    }
+                })
             }
     
-            closePeer(args, util) {
+            closePeer(args) {
                 const name = args.name;
 
                 if (!this.webrtc.peerConnections.has(name)) {
@@ -780,114 +817,95 @@ SOFTWARE.
                 this.webrtc.disconnectDataPeer(name);
             }
     
-            getData(args, util) {
-                const peer = args.peer;
-                const channel = args.channel;
-                return this.webrtc.getChannelData(peer, channel, "data");
+            getData(args) {
+                return this.webrtc.getChannelData(args.peer, args.channel);
             }
     
-            async sendData(args, util) {
-                const data = args.data;
-                const peer = args.peer;
-                const channel = args.channel;
-                const wait = args.wait;
-                await this.webrtc.sendData(peer, channel, data, wait);
+            sendData(args) {
+                return this.webrtc.sendData(args.peer, args.channel, args.data, args.wait);
             }
     
-            createChannel(args, util) {
+            createChannel(args) {
                 const channel = args.channel;
                 const peer = args.peer;
-                const ordered = args.ordered;
-                this.webrtc.createChannel(peer, channel, ordered);
+
+                if (this.webrtc.doesPeerChannelExist(peer, channel)) {
+                    console.warn(`Channel ${channel} already exists with peer ${peer}`);
+                    return;
+                };
+
+                this.webrtc.createChannel(peer, channel, args.ordered);
             }
     
-            closeChannel(args, util) {
+            closeChannel(args) {
                 const channel = args.channel;
                 const peer = args.peer;
+
+                if (!this.webrtc.doesPeerChannelExist(peer, channel)) {
+                    console.warn(`Channel ${channel} does not exist with peer ${peer}`);
+                    return;
+                }
+
+                if (channel == "default") {
+                    console.warn("Cannot close default channel, use the close connection block instead");
+                    return;
+                }
+
                 this.webrtc.closeChannel(peer, channel);
             }
     
-            isChannelOpen(args, util) {
-                const channel = args.channel;
-                const peer = args.peer;
-                return this.webrtc.doesPeerChannelExist(peer, channel);
+            isChannelOpen(args) {
+                return this.webrtc.doesPeerChannelExist(args.peer, args.channel);
             }
     
-            getOffer(args, util) {
-                const peer = args.peer;
-                return this.offers[peer] ? btoa(JSON.stringify(this.offers[peer])) : this.write(`M0 \n`);
+            getOffer(args) {
+                return this.offers[args.peer] ? btoa(JSON.stringify(this.offers[args.peer])) : "";
             }
     
-            async createOffer(args, util) {
-                const peer = args.peer;
-                this.offers[peer] = await this.webrtc.createDataOffer(peer, peer);
+            async createOffer(args) {
+                this.offers[args.peer] = await this.webrtc.createDataOffer(args.peer, args.peer);
             }
     
-            getAnswer(args, util) {
-                const peer = args.peer;
-                return this.answers[peer] ? btoa(JSON.stringify(this.answers[peer])) : this.write(`M0 \n`);
+            getAnswer(args) {
+                return this.answers[args.peer] ? btoa(JSON.stringify(this.answers[args.peer])) : "";
             }
     
-            async createAnswer(args, util) {
-                const peer = args.peer;
-                const offer = args.offer;
-                this.answers[peer] = await this.webrtc.createDataAnswer(peer, peer, JSON.parse(atob(offer)));
+            async createAnswer(args) {
+                this.answers[args.peer] = await this.webrtc.createDataAnswer(args.peer, args.peer, JSON.parse(atob(args.offer)));
             }
     
             async handleAnswer(args, util) {
-                const answer = args.answer;
-                const peer = args.peer;
-                await this.webrtc.handleDataAnswer(peer, JSON.parse(atob(answer)));
+                await this.webrtc.handleDataAnswer(args.peer, JSON.parse(atob(args.answer)));
             }
     
-            async generateIce(args, util) {
-                const peer = args.peer;
-
-                // Wait for this.iceComplete[peer] to be true
-                await until(() => this.iceComplete[peer]);
+            async generateIce(args) {
+                await until(() => this.iceComplete[args.peer]);
             }
     
-            getIce(args, util) {
-                const peer = args.peer;
-                
-                return this.ice[peer] ? btoa(JSON.stringify(this.ice[peer])) : this.write(`M0 \n`);
+            getIce(args) {
+                return this.ice[args.peer] ? btoa(JSON.stringify(this.ice[args.peer])) : "";
             }
     
-            handleIce(args, util) {
-                const ice = args.ice;
-                const peer = args.peer;
-
-                const candidates = JSON.parse(atob(ice));
-                for (const candidate in candidates) {
-                    this.webrtc.addDataIceCandidate(peer, candidate);
+            handleIce(args) {
+                const candidates = JSON.parse(atob(args.ice));
+                for (const key in candidates) {
+                    this.webrtc.addDataIceCandidate(args.peer, candidates[key]);
                 }
             }
     
-            isPeerConnected(args, util) {
-                const peer = args.peer;
-                return this.webrtc.doesPeerExist(peer);
+            isPeerConnected(args) {
+                return this.webrtc.isPeerConnected(args.peer);
             }
-    
 
-            allPeers(args, util) {
+            allPeers() {
                 return JSON.stringify(this.webrtc.getPeers());
             }
 
-            allPeerChannels(args, util) {
-                const peer = args.peer;
-                return JSON.stringify(this.webrtc.getPeerChannels(peer));
+            allPeerChannels(args) {
+                return JSON.stringify(this.webrtc.getPeerChannels(args.peer));
             }
         }
-    
-        /*
-        Scratch2.vm.runtime.on('BEFORE_EXECUTE', () => {
-            Scratch2.vm.runtime.startHats('cl5_on_private_message');
-            Scratch2.vm.runtime.startHats('cl5_on_broadcast_message');
-            Scratch2.vm.runtime.startHats('cl5_on_channel_private_networked_list');
-            Scratch2.vm.runtime.startHats('cl5_on_channel_broadcast_networked_list');
-        });*/
     
         Scratch2.extensions.register(new ScratchWebRTC(Scratch2));
     })(Scratch);
 })();
-
