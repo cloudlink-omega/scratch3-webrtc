@@ -33,7 +33,7 @@ Just as long as you got some way to send a message from point A to B, you're set
 
 🐌🧊 **This extension does NOT implement [Trickle ICE](https://bloggeek.me/webrtcglossary/trickle-ice/)** - Negotiating connections *will be slow.*
 
-If you want a fully-automated solution with Trickle ICE, [consider using CL5 instead.](github.com/cloudlink-omega/cl5)
+If you want a fully-automated solution with Trickle ICE, [consider using CL5 instead.](https://github.com/cloudlink-omega/cl5)
 
 ## Signaling flow
 Let's say that we have two people that want to connect: Alice and Bob.
