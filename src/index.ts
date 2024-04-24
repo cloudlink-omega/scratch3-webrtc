@@ -155,10 +155,19 @@ SOFTWARE.
       return this.dataIceDone.get(id)
     }
 
-    allIceCandidates(id: string): RTCIceCandidate[] {
-      if (!this.dataConnections.has(id)) return []
-      if (!this.dataIceDone.get(id)) return []
-      return this.dataIceCandidates.get(id)
+    allIceCandidates(id: string, mode: number): RTCIceCandidate[] {
+      switch (mode) {
+        case 0:
+          if (!this.dataConnections.has(id)) return []
+          if (!this.dataIceDone.get(id)) return []
+          return this.dataIceCandidates.get(id)
+        case 1:
+          if (!this.voiceConnections.has(id)) return []
+          if (!this.voiceIceDone.get(id)) return []
+          return this.voiceIceCandidates.get(id)
+        default:
+          return []
+      }
     }
 
     /**
@@ -310,16 +319,19 @@ SOFTWARE.
      * @param {string} id - The id of the connection.
      * @param {number} mode - The mode to handle the connection in. 0 for data, 1 for voice.
      * @param {RTCIceCandidate} candidate - The incoming ICE candidate for the connection.
+     * @param {boolean} setup - Optional: If the connection is used for voice, set to true if we want to transmit audio. Otherwise, only accept incoming audio.
      */
     async handleIceCandidate(
       id: string,
       mode: number,
-      candidate: RTCIceCandidate
+      candidate: RTCIceCandidate,
+      setup?: boolean
     ): Promise<void> {
       try {
         const conn = (await this.getConnectionObject(
           id,
-          mode
+          mode,
+          setup
         )) as PeerConnection
         await conn.addIceCandidate(candidate)
       } catch (error: any) {
@@ -332,6 +344,7 @@ SOFTWARE.
      *
      * @param {string} id - The id for the connection.
      * @param {number} mode - The mode indicating the type of connection to create. 0 for data, 1 for voice.
+     * @param {boolean} setup - Optional: If the connection is used for voice, set to true if we want to transmit audio. Otherwise, only accept incoming audio.
      * @return {PeerConnection} The created or returned PeerConnection or an error if mode is invalid.
      */
     async getConnectionObject(
@@ -576,10 +589,10 @@ SOFTWARE.
         .getUserMedia({ audio: true })
         .then(stream => {
           stream.getTracks().forEach(track => conn.addTrack(track, stream))
-          console.log(`Ready for voice stream with ${conn.name}.`)
+          console.log(`Ready for voice stream with ${id}.`)
         })
         .catch(err => {
-          console.error(`Error preparing audio stream for ${conn.name}: ${err}`)
+          console.error(`Error preparing audio stream for ${id}: ${err}`)
           this.closeVoiceConnection(id)
         })
     }
@@ -617,15 +630,22 @@ SOFTWARE.
     closeVoiceConnection(id: string): void {
       const conn = this.voiceConnections.get(id) as PeerConnection
 
-      // Stop all audio track
-      conn.getSenders().forEach(sender => {
-        if (sender.track) sender.track.stop()
-      })
+      if (conn) {
+        // Stop all audio tracks
+        conn.getSenders().forEach(sender => {
+          if (sender.track) sender.track.stop()
+        })
+
+        // Gracefully close the connection
+        conn.close()
+      }
 
       // Remove all playing audio elements if they exist
-      for (let n = 0; n < this.voiceStreams.get(id).length; n++) {
-        const audioElement = document.getElementById(`audio_${n}_${id}`)
-        if (audioElement) document.body.removeChild(audioElement)
+      if (this.voiceStreams.has(id)) {
+        for (let n = 0; n < this.voiceStreams.get(id).length; n++) {
+          const audioElement = document.getElementById(`audio_${n}_${id}`)
+          if (audioElement) document.body.removeChild(audioElement)
+        }
       }
 
       // Delete the connection
@@ -752,10 +772,10 @@ SOFTWARE.
   // Define the extension for WebRTC for Scratch
   class ScratchWebRTC implements Scratch.Extension {
     vm: VM
-    offers: Map<string, any>
-    answers: Map<string, any>
-    ice: Map<string, any>
-    iceComplete: Map<string, any>
+    offers: Map<number, Map<string, any>>
+    answers: Map<number, Map<string, any>>
+    ice: Map<number, Map<string, any>>
+    iceComplete: Map<number, Map<string, any>>
     blockIconURI: string
     menuIconURI: string
 
@@ -810,9 +830,14 @@ SOFTWARE.
               name: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'Create peer [name] connection object'
+            text: 'Create peer [name] [mode] connection object'
           },
           {
             opcode: 'closePeer',
@@ -821,9 +846,14 @@ SOFTWARE.
               name: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'Close peer [name] connection object'
+            text: 'Close peer [name] [mode] connection object'
           },
           {
             opcode: 'isPeerConnected',
@@ -832,9 +862,14 @@ SOFTWARE.
               peer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'Is peer [peer] connected?'
+            text: 'Is [mode] peer [peer] connected?'
           },
           {
             opcode: 'createOffer',
@@ -843,9 +878,14 @@ SOFTWARE.
               peer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'Make an offer for peer [peer]'
+            text: 'Make a [mode] offer for peer [peer]'
           },
           {
             opcode: 'getOffer',
@@ -854,9 +894,14 @@ SOFTWARE.
               peer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'Offer for peer [peer]'
+            text: 'Offer for [mode] peer [peer]'
           },
           {
             opcode: 'createAnswer',
@@ -869,9 +914,14 @@ SOFTWARE.
               offer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'offer'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'Make answer for peer [peer] using offer [offer]'
+            text: 'Make answer for [mode] peer [peer] using offer [offer]'
           },
           {
             opcode: 'getAnswer',
@@ -880,9 +930,14 @@ SOFTWARE.
               peer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'Answer for peer [peer]'
+            text: 'Answer for [mode] peer [peer]'
           },
           {
             opcode: 'generateIce',
@@ -891,9 +946,14 @@ SOFTWARE.
               peer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'Gather ICE candidates for peer [peer]'
+            text: 'Gather [mode] ICE candidates for peer [peer]'
           },
           {
             opcode: 'getIce',
@@ -902,9 +962,14 @@ SOFTWARE.
               peer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: 'All ICE candidates for peer [peer]'
+            text: 'All [mode] ICE candidates for peer [peer]'
           },
           {
             opcode: 'handleAnswer',
@@ -917,9 +982,14 @@ SOFTWARE.
               peer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: "Handle peer [peer]'s answer [answer]"
+            text: "Handle [mode] peer [peer]'s answer [answer]"
           },
           {
             opcode: 'handleIce',
@@ -932,9 +1002,14 @@ SOFTWARE.
               peer: {
                 type: Scratch.ArgumentType.STRING,
                 defaultValue: 'apple'
+              },
+              mode: {
+                type: Scratch.ArgumentType.STRING,
+                menu: 'mode',
+                defaultValue: 'data'
               }
             },
-            text: "Handle peer [peer]'s ICE candidates [ice]"
+            text: "Handle [mode] peer [peer]'s ICE candidates [ice]"
           },
           {
             opcode: 'sendData',
@@ -1023,7 +1098,12 @@ SOFTWARE.
             },
             text: 'Does data channel [channel] with peer [peer] exist?'
           }
-        ]
+        ],
+        menus: {
+          mode: {
+            items: ['data', 'voice']
+          }
+        }
       }
     }
 
@@ -1034,23 +1114,47 @@ SOFTWARE.
     async newPeer(args) {
       const name = args.name
 
-      if (webrtc.dataConnections.has(name)) {
-        console.warn(`Peer ${name} already exists`)
-        return
+      var mode: number
+      switch (args.mode) {
+        case 'data':
+          if (webrtc.dataConnections.has(name)) {
+            console.warn(`Data peer ${name} already exists`)
+            return
+          }
+          mode = 0
+          break
+        case 'voice':
+          if (webrtc.voiceConnections.has(name)) {
+            console.warn(`Voice peer ${name} already exists`)
+            return
+          }
+          mode = 1
+          break
       }
 
-      await webrtc.getConnectionObject(name, 0)
+      await webrtc.getConnectionObject(name, mode, true)
     }
 
     closePeer(args) {
       const name = args.name as string
+      switch (args.mode) {
+        case 'data':
+          if (!webrtc.dataConnections.has(name)) {
+            console.warn(`Data peer ${name} does not exist`)
+            return
+          }
 
-      if (!webrtc.dataConnections.has(name)) {
-        console.warn(`Peer ${name} does not exist`)
-        return
+          webrtc.closeDataConnection(name)
+          break
+        case 'voice':
+          if (!webrtc.voiceConnections.has(name)) {
+            console.warn(`Voice peer ${name} does not exist`)
+            return
+          }
+
+          webrtc.closeVoiceConnection(name)
+          break
       }
-
-      webrtc.closeDataConnection(name)
     }
 
     getData(args) {
@@ -1099,28 +1203,86 @@ SOFTWARE.
     }
 
     getOffer(args) {
-      return this.offers[args.peer]
-        ? btoa(JSON.stringify(this.offers[args.peer]))
+      var mode: number
+      switch (args.mode) {
+        case 'data':
+          mode = 0
+          break
+        case 'voice':
+          mode = 1
+          break
+      }
+      
+      if (!this.offers.has(mode)) this.offers.set(mode, new Map())
+
+      return this.offers.get(mode).has(args.peer)
+        ? btoa(JSON.stringify(this.offers.get(mode).get(args.peer)))
         : ''
     }
 
     async createOffer(args) {
-      this.offers[args.peer] = await webrtc.createOffer(args.peer, args.peer, 0)
+      var mode: number
+      switch (args.mode) {
+        case 'data':
+          mode = 0
+          break
+        case 'voice':
+          mode = 1
+          break
+      }
+
+      if (!this.offers.has(mode)) this.offers.set(mode, new Map())
+      this.offers
+        .get(mode)
+        .set(
+          args.peer,
+          await webrtc.createOffer(args.peer, args.peer, mode, true)
+        )
     }
 
     getAnswer(args) {
-      return this.answers[args.peer]
-        ? btoa(JSON.stringify(this.answers[args.peer]))
+      var mode: number
+      switch (args.mode) {
+        case 'data':
+          mode = 0
+          break
+        case 'voice':
+          mode = 1
+          break
+      }
+
+      if (!this.answers.has(mode)) this.answers.set(mode, new Map())
+
+      return this.answers.get(mode).has(args.peer)
+        ? btoa(JSON.stringify(this.answers.get(mode).get(args.peer)))
         : ''
     }
 
     async createAnswer(args) {
-      this.answers[args.peer] = await webrtc.createAnswer(
-        args.peer,
-        args.peer,
-        0,
-        JSON.parse(atob(args.offer))
-      )
+      var mode: number
+      switch (args.mode) {
+        case 'data':
+          mode = 0
+          break
+        case 'voice':
+          mode = 1
+          break
+      }
+
+      if (!this.answers.has(mode)) this.answers.set(mode, new Map())
+
+      this.answers
+        .get(mode)
+        .set(
+          args.peer,
+          await webrtc.createAnswer(
+            args.peer,
+            args.peer,
+            0,
+            JSON.parse(atob(args.offer)),
+            true
+          )
+        )
     }
 
     async handleAnswer(args) {
@@ -1132,15 +1294,35 @@ SOFTWARE.
     }
 
     getIce(args) {
-      const result = webrtc.allIceCandidates(args.peer)
+      var mode: number
+      switch (args.mode) {
+        case 'data':
+          mode = 0
+          break
+        case 'voice':
+          mode = 1
+          break
+      }
+
+      const result = webrtc.allIceCandidates(args.peer, mode)
       if (result.length == 0) return ''
       return btoa(JSON.stringify(result))
     }
 
     handleIce(args) {
+      var mode: number
+      switch (args.mode) {
+        case 'data':
+          mode = 0
+          break
+        case 'voice':
+          mode = 1
+          break
+      }
+
       const candidates = JSON.parse(atob(args.ice))
       for (const key in candidates) {
-        webrtc.handleIceCandidate(args.peer, 0, candidates[key])
+        webrtc.handleIceCandidate(args.peer, mode, candidates[key], true)
       }
     }
 
