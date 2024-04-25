@@ -296,16 +296,19 @@ SOFTWARE.
      * @param {string} id - The id of the connection.
      * @param {number} mode - The mode to handle the connection in. 0 for data, 1 for voice.
      * @param {RTCSessionDescriptionInit} answer - The incoming answer for the connection.
+     * @param {boolean} setup - Optional: If the connection is used for voice, set to true if we want to transmit audio. Otherwise, only accept incoming audio.
      */
     async handleAnswer(
       id: string,
       mode: number,
-      answer: RTCSessionDescriptionInit
+      answer: RTCSessionDescriptionInit,
+      setup?: boolean
     ): Promise<void> {
       try {
         const conn = (await this.getConnectionObject(
           id,
-          mode
+          mode,
+          setup
         )) as PeerConnection
         await conn.setRemoteDescription(new RTCSessionDescription(answer))
       } catch (error: any) {
@@ -487,7 +490,7 @@ SOFTWARE.
 
             break
           case 'failed':
-            console.log(`Data peer ${id} failed.`)
+            console.log(`Data peer ${id} disconnected.`)
             this.closeDataConnection(id)
             this.fire(`${id}_closed`)
             break
@@ -726,7 +729,7 @@ SOFTWARE.
             this.closeVoiceConnection(id)
             break
           case 'failed':
-            console.log(`Voice peer ${id} failed.`)
+            console.log(`Voice peer ${id} disconnected.`)
             this.closeVoiceConnection(id)
             break
         }
@@ -734,7 +737,7 @@ SOFTWARE.
 
       conn.ontrack = (event: RTCTrackEvent) => {
         console.log(
-          `Adding peer ${id} incoming streams: ${event.streams.length} streams incoming.`
+          `Adding peer ${id} incoming streams: ${event.streams.length} stream(s) incoming.`
         )
 
         // Auto-play incoming audio streams
@@ -743,15 +746,11 @@ SOFTWARE.
           // Add the stream to the array
           this.voiceStreams.get(id).push(stream)
 
-          // Define the options for the audio element
-          const options = {
-            id: `audio_${n}_${id}`,
-            autoplay: true,
-            srcObject: stream
-          } as ElementCreationOptions
-
           // Create the audio element and attach it to the DOM
-          const audioElement = document.createElement(`audio`, options)
+          const audioElement = document.createElement(`audio`)
+          audioElement.id = `audio_${n}_${id}`
+          audioElement.srcObject = stream
+          audioElement.autoplay = true
           document.body.appendChild(audioElement)
 
           // Increment the stream counter
@@ -772,19 +771,21 @@ SOFTWARE.
   // Define the extension for WebRTC for Scratch
   class ScratchWebRTC implements Scratch.Extension {
     vm: VM
-    offers: Map<number, Map<string, any>>
-    answers: Map<number, Map<string, any>>
-    ice: Map<number, Map<string, any>>
-    iceComplete: Map<number, Map<string, any>>
+    voiceOffers: Map<string, RTCSessionDescriptionInit>
+    dataOffers: Map<string, RTCSessionDescriptionInit>
+    voiceAnswers: Map<string, RTCSessionDescriptionInit>
+    dataAnswers: Map<string, RTCSessionDescriptionInit>
     blockIconURI: string
     menuIconURI: string
 
     constructor(vm: VM) {
       this.vm = vm
-      this.offers = new Map()
-      this.answers = new Map()
-      this.ice = new Map()
-      this.iceComplete = new Map()
+
+      this.dataOffers = new Map()
+      this.voiceOffers = new Map()
+
+      this.dataAnswers = new Map()
+      this.voiceAnswers = new Map()
       this.menuIconURI =
         'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjwhLS0gVXBsb2FkZWQgdG86IFNWRyBSZXBvLCB3d3cuc3ZncmVwby5jb20sIEdlbmVyYXRvcjogU1ZHIFJlcG8gTWl4ZXIgVG9vbHMgLS0+Cjxzdmcgd2lkdGg9IjgwMHB4IiBoZWlnaHQ9IjgwMHB4IiB2aWV3Qm94PSIwIC0zLjUgMjU2IDI1NiIgdmVyc2lvbj0iMS4xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJ4TWlkWU1pZCI+Cgk8Zz4KCQk8cGF0aCBkPSJNMTQyLjA3NjU3OCwxOTEuMDg2ODE3IEMxNDIuMDc2NTc4LDE1OS4yODA2NTYgMTE2LjI5NDc1OSwxMzMuNDk0NjE1IDg0LjQ4ODU5NjksMTMzLjQ5NDYxNSBDNTIuNjc4MjEzNiwxMzMuNDk0NjE1IDI2Ljg5NjM5NCwxNTkuMjgwNjU2IDI2Ljg5NjM5NCwxOTEuMDg2ODE3IEMyNi44OTYzOTQsMjIyLjg5Mjk3OSA1Mi42NzgyMTM2LDI0OC42NzkwMiA4NC40ODg1OTY5LDI0OC42NzkwMiBDMTE2LjI5NDc1OSwyNDguNjc5MDIgMTQyLjA3NjU3OCwyMjIuODkyOTc5IDE0Mi4wNzY1NzgsMTkxLjA4NjgxNyIgZmlsbD0iI0ZGNjYwMCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoODQuNDg2NDg2LCAxOTEuMDg2ODE3KSBzY2FsZSgxLCAtMSkgdHJhbnNsYXRlKC04NC40ODY0ODYsIC0xOTEuMDg2ODE3KSAiPgoNPC9wYXRoPgoJCTxwYXRoIGQ9Ik0yNTUuOTc5NzAzLDExMC40NTQzNTYgQzI1NS45Nzk3MDMsNzguNjUyNDE2IDIzMC4xOTc4ODQsNTIuODYyMTUzIDE5OC4zOTE3MjIsNTIuODYyMTUzIEMxNjYuNTgxMzM5LDUyLjg2MjE1MyAxNDAuNzk5NTE5LDc4LjY1MjQxNiAxNDAuNzk5NTE5LDExMC40NTQzNTYgQzE0MC43OTk1MTksMTQyLjI2MDUxOCAxNjYuNTgxMzM5LDE2OC4wNTA3ODEgMTk4LjM5MTcyMiwxNjguMDUwNzgxIEMyMzAuMTk3ODg0LDE2OC4wNTA3ODEgMjU1Ljk3OTcwMywxNDIuMjYwNTE4IDI1NS45Nzk3MDMsMTEwLjQ1NDM1NiIgZmlsbD0iI0ZGQ0MwMCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTk4LjM4OTYxMSwgMTEwLjQ1NjQ2Nykgc2NhbGUoMSwgLTEpIHRyYW5zbGF0ZSgtMTk4LjM4OTYxMSwgLTExMC40NTY0NjcpICI+Cg08L3BhdGg+CgkJPHBhdGggZD0iTTExNS4yMDA0OTgsMTA5LjE3NjQ1MiBDMTE1LjIwMDQ5OCw3Ny4zNzQ1MTI1IDg5LjQxODY3ODYsNTEuNTg0MjQ5NSA1Ny42MDgyOTUzLDUxLjU4NDI0OTUgQzI1LjgwNjM1NTMsNTEuNTg0MjQ5NSAwLjAyMDMxNDAyNzEsNzcuMzc0NTEyNSAwLjAyMDMxNDAyNzEsMTA5LjE3NjQ1MiBDMC4wMjAzMTQwMjcxLDE0MC45ODI2MTQgMjUuODA2MzU1MywxNjYuNzcyODc3IDU3LjYwODI5NTMsMTY2Ljc3Mjg3NyBDODkuNDE4Njc4NiwxNjYuNzcyODc3IDExNS4yMDA0OTgsMTQwLjk4MjYxNCAxMTUuMjAwNDk4LDEwOS4xNzY0NTIiIGZpbGw9IiMwMDg5Q0MiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDU3LjYxMDQwNiwgMTA5LjE3ODU2Mykgc2NhbGUoMSwgLTEpIHRyYW5zbGF0ZSgtNTcuNjEwNDA2LCAtMTA5LjE3ODU2MykgIj4KDTwvcGF0aD4KCQk8cGF0aCBkPSJNMjMwLjM4NTc0OSwxOTEuMDg2ODE3IEMyMzAuMzg1NzQ5LDE1OS4yODA2NTYgMjA0LjYwMzkyOSwxMzMuNDk0NjE1IDE3Mi43ODkzMjQsMTMzLjQ5NDYxNSBDMTQwLjk4NzM4NCwxMzMuNDk0NjE1IDExNS4yMDEzNDMsMTU5LjI4MDY1NiAxMTUuMjAxMzQzLDE5MS4wODY4MTcgQzExNS4yMDEzNDMsMjIyLjg5Mjk3OSAxNDAuOTg3Mzg0LDI0OC42NzkwMiAxNzIuNzg5MzI0LDI0OC42NzkwMiBDMjA0LjYwMzkyOSwyNDguNjc5MDIgMjMwLjM4NTc0OSwyMjIuODkyOTc5IDIzMC4zODU3NDksMTkxLjA4NjgxNyIgZmlsbD0iIzAwOTkzOSIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTcyLjc5MzU0NiwgMTkxLjA4NjgxNykgc2NhbGUoMSwgLTEpIHRyYW5zbGF0ZSgtMTcyLjc5MzU0NiwgLTE5MS4wODY4MTcpICI+Cg08L3BhdGg+CgkJPHBhdGggZD0iTTE4NS41OTIwMDEsNTcuOTg0MzIxMyBDMTg1LjU5MjAwMSwyNi4xNzgxNTk3IDE1OS44MDU5NTksMC4zOTIxMTgzNDkgMTI3Ljk5OTc5OCwwLjM5MjExODM0OSBDOTYuMTkzNjM1OSwwLjM5MjExODM0OSA3MC40MDc1OTQ2LDI2LjE3ODE1OTcgNzAuNDA3NTk0Niw1Ny45ODQzMjEzIEM3MC40MDc1OTQ2LDg5Ljc5MDQ4MyA5Ni4xOTM2MzU5LDExNS41NzY1MjQgMTI3Ljk5OTc5OCwxMTUuNTc2NTI0IEMxNTkuODA1OTU5LDExNS41NzY1MjQgMTg1LjU5MjAwMSw4OS43OTA0ODMgMTg1LjU5MjAwMSw1Ny45ODQzMjEzIiBmaWxsPSIjQkYwMDAwIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMjcuOTk5Nzk4LCA1Ny45ODQzMjEpIHNjYWxlKDEsIC0xKSB0cmFuc2xhdGUoLTEyNy45OTk3OTgsIC01Ny45ODQzMjEpICI+Cg08L3BhdGg+CgkJPHBhdGggZD0iTTE0MC43OTg2NzUsNTcuOTc4ODMzMSBDMTQwLjc5ODY3NSw1Ni43NjcyMSAxNDAuOTA0MjE3LDU1LjU4MDkxNyAxNDAuOTgwMjA3LDU0LjM4NjE4MDcgQzE2Ni41MjU2MTIsNjAuMjc5NjUwNSAxODUuNTkwNzM0LDgzLjExODk1NjkgMTg1LjU5MDczNCwxMTAuNDU0MzU2IEMxODUuNTkwNzM0LDExMS42NjU5NzkgMTg1LjQ4NTE5MiwxMTIuODU2NDk0IDE4NS40MDkyMDIsMTE0LjA1MTIzIEMxNTkuODYzNzk2LDEwOC4xNTM1MzkgMTQwLjc5ODY3NSw4NS4zMTQyMzIyIDE0MC43OTg2NzUsNTcuOTc4ODMzMSIgZmlsbD0iI0ZDMDAwNyIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTYzLjE5NDcwNCwgODQuMjE4NzA1KSBzY2FsZSgxLCAtMSkgdHJhbnNsYXRlKC0xNjMuMTk0NzA0LCAtODQuMjE4NzA1KSAiPgoNPC9wYXRoPgoJCTxwYXRoIGQ9Ik0xNDguMzk2ODYsMTYyLjU3MDYxNCBDMTU4LjMyMjAzOCwxNDUuMjE5NDk1IDE3Ni45NzM0MzQsMTMzLjQ5NTg4MSAxOTguMzk0MjU1LDEzMy40OTU4ODEgQzIwNy4xMjQ2OTYsMTMzLjQ5NTg4MSAyMTUuMzY5NjQzLDEzNS40OTY5NTkgMjIyLjc4NzE0MSwxMzguOTc1NjI2IEMyMTIuODY2MTg1LDE1Ni4zMjY3NDQgMTk0LjIxNDc4OSwxNjguMDUwMzU4IDE3Mi43ODk3NDYsMTY4LjA1MDM1OCBDMTY0LjA1OTMwNSwxNjguMDUwMzU4IDE1NS44MTQzNTgsMTY2LjA0OTI4MSAxNDguMzk2ODYsMTYyLjU3MDYxNCIgZmlsbD0iIzFDRDMwNiIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTg1LjU5MjAwMSwgMTUwLjc3MzEyMCkgc2NhbGUoMSwgLTEpIHRyYW5zbGF0ZSgtMTg1LjU5MjAwMSwgLTE1MC43NzMxMjApICI+Cg08L3BhdGg+CgkJPHBhdGggZD0iTTExNS4yMDA0OTgsMTkxLjA4NjgxNyBDMTE1LjIwMDQ5OCwxNzcuMDE1OTQ3IDEyMC4yNTgwNzUsMTY0LjEzOTgxMyAxMjguNjQyMzM4LDE1NC4xMzg2NDYgQzEzNy4wMTgxNTcsMTY0LjEzOTgxMyAxNDIuMDc1NzM0LDE3Ny4wMTU5NDcgMTQyLjA3NTczNCwxOTEuMDg2ODE3IEMxNDIuMDc1NzM0LDIwNS4xNTc2ODggMTM3LjAxODE1NywyMTguMDMzODIyIDEyOC42NDIzMzgsMjI4LjAzNDk4OSBDMTIwLjI1ODA3NSwyMTguMDMzODIyIDExNS4yMDA0OTgsMjA1LjE1NzY4OCAxMTUuMjAwNDk4LDE5MS4wODY4MTciIGZpbGw9IiMwRjc1MDQiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEyOC42MzgxMTYsIDE5MS4wODY4MTcpIHNjYWxlKDEsIC0xKSB0cmFuc2xhdGUoLTEyOC42MzgxMTYsIC0xOTEuMDg2ODE3KSAiPgoNPC9wYXRoPgoJCTxwYXRoIGQ9Ik0zNC44MDY5ODQsMTM4LjIxMjc2OCBDNDEuODAyMzEzMiwxMzUuMTkwMDQzIDQ5LjUwMjY2MzUsMTMzLjQ5NzE0OCA1Ny42MDgyOTUzLDEzMy40OTcxNDggQzc4LjgxODAzMiwxMzMuNDk3MTQ4IDk3LjI5NjMzOTYsMTQ0Ljk5Mjc5MSAxMDcuMjkzMjg2LDE2Mi4wNjEwNTYgQzEwMC4yOTc5NTYsMTY1LjA4Mzc4MiA5Mi41OTMzODQ0LDE2Ni43NzI0NTUgODQuNDkxOTc0MywxNjYuNzcyNDU1IEM2My4yODIyMzc2LDE2Ni43NzI0NTUgNDQuNzk5NzA4MywxNTUuMjc2ODExIDM0LjgwNjk4NCwxMzguMjEyNzY4IiBmaWxsPSIjMEM1RTg3IiB0cmFuc2Zvcm09InRyYW5zbGF0ZSg3MS4wNTAxMzUsIDE1MC4xMzQ4MDEpIHNjYWxlKDEsIC0xKSB0cmFuc2xhdGUoLTcxLjA1MDEzNSwgLTE1MC4xMzQ4MDEpICI+Cg08L3BhdGg+CgkJPHBhdGggZD0iTTcwLjY1NDU2MzEsMTE0LjAzNjAzMiBDNzAuNTE5NDY5MiwxMTIuNDMxNzkyIDcwLjQwNTQ4MzgsMTEwLjgxOTEwOSA3MC40MDU0ODM4LDEwOS4xNzY4NzUgQzcwLjQwNTQ4MzgsODEuODYyNTg0IDg5LjQ0MTA1MzYsNTkuMDQ0Mzg2IDExNC45NTY5MDcsNTMuMTI1NTg2MSBDMTE1LjA4Nzc3OSw1NC43Mjk4MjU3IDExNS4yMDE3NjUsNTYuMzQyNTA4NyAxMTUuMjAxNzY1LDU3Ljk4MDUyMTggQzExNS4yMDE3NjUsODUuMjk0ODEyNSA5Ni4xNzA0MTY3LDEwOC4xMjE0NTQgNzAuNjU0NTYzMSwxMTQuMDM2MDMyIiBmaWxsPSIjNkIwMDAxIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSg5Mi44MDM2MjQsIDgzLjU4MDgwOSkgc2NhbGUoMSwgLTEpIHRyYW5zbGF0ZSgtOTIuODAzNjI0LCAtODMuNTgwODA5KSAiPgoNPC9wYXRoPgoJCTxwYXRoIGQ9Ik03Ni4wMzA0NTQ1LDExMS41MDM4NjYgTDY3LjAyMTM4MjUsMTExLjUwMzg2NiBDNTkuMDY3NzMxMiwxMTEuNTAzODY2IDUyLjYwMDExMjUsMTE3Ljk1MDM3NyA1Mi42MDAxMTI1LDEyNS44ODI5MiBMNTIuNjAwMTEyNSwyMDcuNDI4OTUzIEM1Mi42MDAxMTI1LDIxNS4zNjE0OTYgNTkuMDY3NzMxMiwyMjEuODEyMjI4IDY3LjAyMTM4MjUsMjIxLjgxMjIyOCBMMTc5Ljk4OTQwNSwyMjEuODEyMjI4IEMxODcuOTQzMDU2LDIyMS44MTIyMjggMTk0LjQwNjQ1MywyMTUuMzYxNDk2IDE5NC40MDY0NTMsMjA3LjQyODk1MyBMMTk0LjQwNjQ1MywxMjUuODgyOTIgQzE5NC40MDY0NTMsMTE3Ljk1MDM3NyAxODcuOTQzMDU2LDExMS41MDM4NjYgMTc5Ljk4OTQwNSwxMTEuNTAzODY2IEwxNDEuNTA0NTQsMTExLjUwMzg2NiBMNjQuMjg5OTUzNCw3My42NTIyNTQ0IEw3Ni4wMzA0NTQ1LDExMS41MDM4NjYgTDc2LjAzMDQ1NDUsMTExLjUwMzg2NiBaIiBmaWxsPSIjRkZGRkZGIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMjMuNTAzMjgzLCAxNDcuNzMyMjQxKSBzY2FsZSgxLCAtMSkgdHJhbnNsYXRlKC0xMjMuNTAzMjgzLCAtMTQ3LjczMjI0MSkgIj4KDTwvcGF0aD4KCTwvZz4KPC9zdmc+'
       this.blockIconURI =
@@ -1203,62 +1204,77 @@ SOFTWARE.
     }
 
     getOffer(args) {
-      var mode: number
       switch (args.mode) {
         case 'data':
-          mode = 0
-          break
-        case 'voice':
-          mode = 1
-          break
-      }
-      
-      if (!this.offers.has(mode)) this.offers.set(mode, new Map())
+          return this.dataOffers.has(args.peer)
+            ? btoa(JSON.stringify(this.dataOffers.get(args.peer)))
+            : ''
 
-      return this.offers.get(mode).has(args.peer)
-        ? btoa(JSON.stringify(this.offers.get(mode).get(args.peer)))
-        : ''
+        case 'voice':
+          return this.voiceOffers.has(args.peer)
+            ? btoa(JSON.stringify(this.voiceOffers.get(args.peer)))
+            : ''
+        default:
+          return ''
+      }
     }
 
     async createOffer(args) {
-      var mode: number
+      var offer: RTCSessionDescriptionInit | void
       switch (args.mode) {
         case 'data':
-          mode = 0
+          offer = await webrtc.createOffer(args.peer, args.peer, 0)
+          if (offer) this.dataOffers.set(args.peer, offer)
           break
         case 'voice':
-          mode = 1
+          offer = await webrtc.createOffer(args.peer, args.peer, 1, true)
+          if (offer) this.voiceOffers.set(args.peer, offer)
           break
       }
-
-      if (!this.offers.has(mode)) this.offers.set(mode, new Map())
-      this.offers
-        .get(mode)
-        .set(
-          args.peer,
-          await webrtc.createOffer(args.peer, args.peer, mode, true)
-        )
     }
 
     getAnswer(args) {
-      var mode: number
       switch (args.mode) {
         case 'data':
-          mode = 0
-          break
+          return this.dataAnswers.has(args.peer)
+            ? btoa(JSON.stringify(this.dataAnswers.get(args.peer)))
+            : ''
+
         case 'voice':
-          mode = 1
-          break
+          return this.voiceAnswers.has(args.peer)
+            ? btoa(JSON.stringify(this.voiceAnswers.get(args.peer)))
+            : ''
+        default:
+          return ''
       }
-
-      if (!this.answers.has(mode)) this.answers.set(mode, new Map())
-
-      return this.answers.get(mode).has(args.peer)
-        ? btoa(JSON.stringify(this.answers.get(mode).get(args.peer)))
-        : ''
     }
 
     async createAnswer(args) {
+      var answer: RTCSessionDescriptionInit | void
+      switch (args.mode) {
+        case 'data':
+          answer = await webrtc.createAnswer(
+            args.peer,
+            args.peer,
+            0,
+            JSON.parse(atob(args.offer))
+          )
+          if (answer) this.dataAnswers.set(args.peer, answer)
+          break
+        case 'voice':
+          answer = await webrtc.createAnswer(
+            args.peer,
+            args.peer,
+            1,
+            JSON.parse(atob(args.offer)),
+            true
+          )
+          if (answer) this.voiceAnswers.set(args.peer, answer)
+          break
+      }
+    }
+
+    async handleAnswer(args) {
       var mode: number
       switch (args.mode) {
         case 'data':
@@ -1268,25 +1284,12 @@ SOFTWARE.
           mode = 1
           break
       }
-
-      if (!this.answers.has(mode)) this.answers.set(mode, new Map())
-
-      this.answers
-        .get(mode)
-        .set(
-          args.peer,
-          await webrtc.createAnswer(
-            args.peer,
-            args.peer,
-            0,
-            JSON.parse(atob(args.offer)),
-            true
-          )
-        )
-    }
-
-    async handleAnswer(args) {
-      await webrtc.handleAnswer(args.peer, 0, JSON.parse(atob(args.answer)))
+      await webrtc.handleAnswer(
+        args.peer,
+        mode,
+        JSON.parse(atob(args.answer)),
+        true
+      )
     }
 
     async generateIce(args) {
@@ -1305,7 +1308,6 @@ SOFTWARE.
       }
 
       const result = webrtc.allIceCandidates(args.peer, mode)
-      if (result.length == 0) return ''
       return btoa(JSON.stringify(result))
     }
 
