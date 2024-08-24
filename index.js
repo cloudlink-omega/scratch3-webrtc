@@ -50,8 +50,8 @@ TODO 3: Audio panning support https://developer.mozilla.org/en-US/docs/Web/API/S
     
                     // Public STUN/TURN servers.
                     iceServers: [
-                        { urls: 'stun:vpn.mikedev101.cc:3478' },
-                        { urls: 'turn:vpn.mikedev101.cc:3478', username: "free", credential: "free" },
+                        { urls: 'stun:vpn.mikedev101.cc:5349' },
+                        { urls: 'turn:vpn.mikedev101.cc:5349', username: "free", credential: "free" },
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:freeturn.net:3478' },
                         { urls: 'stun:freeturn.net:5349' },
